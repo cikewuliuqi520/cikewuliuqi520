@@ -18,8 +18,3 @@
 - [video-auto-publisher](https://github.com/cikewuliuqi520/video-auto-publisher) — 一键文生视频自动发布系统（Next.js + DeepSeek + FFmpeg）
 - [zhenyuan-chat-server](https://github.com/cikewuliuqi520/zhenyuan-chat-server) — 聊天服务端
 
-### 📊 GitHub Stats
-
-![GitHub Stats](https://github-readme-stats.vercel.app/api?username=cikewuliuqi520&show_icons=true&theme=default&hide_title=true&count_private=true&cache_seconds=86400)
-
-![Top Langs](https://github-readme-stats.vercel.app/api/top-langs/?username=cikewuliuqi520&layout=compact&theme=default)
