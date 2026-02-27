@@ -20,4 +20,6 @@
 
 ### 📊 GitHub Stats
 
-![GitHub Stats](https://github-readme-stats.vercel.app/api?username=cikewuliuqi520&show_icons=true&theme=default&hide_title=true&count_private=true)
+![GitHub Stats](https://github-readme-stats.vercel.app/api?username=cikewuliuqi520&show_icons=true&theme=default&hide_title=true&count_private=true&cache_seconds=86400)
+
+![Top Langs](https://github-readme-stats.vercel.app/api/top-langs/?username=cikewuliuqi520&layout=compact&theme=default)
