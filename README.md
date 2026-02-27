@@ -16,5 +16,4 @@
 ### 🚀 个人项目
 
 - [video-auto-publisher](https://github.com/cikewuliuqi520/video-auto-publisher) — 一键文生视频自动发布系统（Next.js + DeepSeek + FFmpeg）
-- [zhenyuan-chat-server](https://github.com/cikewuliuqi520/zhenyuan-chat-server) — 聊天服务端
-
+- [ supermarket-voice-assistant](https://github.com/cikewuliuqi520/supermarket-voice-assistant) — 超市语音助手 - 支持语音查价、智能对话、商品管理
