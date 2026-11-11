@@ -21,7 +21,7 @@
 
 ### 🌐 Clash 网络优化 Skill
 
-给 Mac 上的 Clash Party / mihomo 选择可用且稳定的 OpenAI 节点。单次执行有 20 秒截止时间；测速失败时保留或恢复原节点。节点维护表保存在使用者自己的电脑上，不包含订阅码或密钥。
+给 Windows 或 Mac 上的 Clash Party / mihomo 选择可用且稳定的 OpenAI 节点。单次执行有 20 秒截止时间；测速失败时保留或恢复原节点。节点维护表保存在使用者自己的电脑上，不包含订阅码或密钥。
 
 Codex 用户一键安装：
 
@@ -29,6 +29,12 @@ Codex 用户一键安装：
 npx --yes skills add cikewuliuqi520/cikewuliuqi520 --skill clash-network-optimize --agent codex --global --yes
 ```
 
+Windows PowerShell 中使用：
+
+```powershell
+npx.cmd --yes skills add cikewuliuqi520/cikewuliuqi520 --skill clash-network-optimize --agent codex --global --yes
+```
+
 安装后对 Codex 说「优化下网络问题」，或明确说「优化 OpenAI 的 Clash 节点」。
 
-要求 macOS、Python 3、curl 和已启动的 Clash Party。节点表默认存放在 `~/.cache/clash-network-optimize/nodes.json`，每台电脑独立维护。详见 [Skill 说明](skills/clash-network-optimize/SKILL.md)。
+要求 Node.js/npm、Python 3、curl 和已启动的 Clash Party / mihomo。Windows 客户端还需启用本机控制 API；常见端口会自动发现，自定义端口可用 `CLASH_CONTROLLER` 指定。节点表在 Windows 的 `%LOCALAPPDATA%\clash-network-optimize\nodes.json` 或 Mac 的 `~/.cache/clash-network-optimize/nodes.json`，每台电脑独立维护。详见 [Skill 说明](skills/clash-network-optimize/SKILL.md)。
