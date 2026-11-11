@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select a verified OpenAI route in Clash Party within an 18-second work budget."""
+"""Select a verified OpenAI route in mihomo within a 20-second deadline."""
 
 import argparse
 import concurrent.futures
@@ -7,11 +7,15 @@ import glob
 import hashlib
 import json
 import os
+import platform
+import shutil
 import statistics
 import subprocess
 import sys
 import time
 import urllib.parse
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 
@@ -108,19 +112,38 @@ class Budget:
 
 
 def curl(args, timeout):
+    executable = "curl.exe" if platform.system() == "Windows" else "curl"
+    if not shutil.which(executable):
+        raise RuntimeError(executable + " is required")
     return subprocess.run(
-        ["curl", "-sS", "--max-time", "%.2f" % timeout] + args,
+        [executable, "-sS", "--max-time", "%.2f" % timeout] + args,
         capture_output=True, text=True, timeout=timeout + 0.3,
     )
 
 
 class Core:
-    def __init__(self, socket, budget):
-        self.socket, self.budget = socket, budget
+    def __init__(self, endpoint, budget, secret=""):
+        self.endpoint, self.budget, self.secret = endpoint, budget, secret
 
     def request(self, method, path, payload=None, restore=False, timeout_cap=0.8):
         timeout = self.budget.finish_limit() if restore else self.budget.limit(timeout_cap)
-        args = ["--unix-socket", self.socket, "-X", method]
+        if self.endpoint.startswith("http://"):
+            data = json.dumps(payload).encode() if payload is not None else None
+            headers = {"Content-Type": "application/json"}
+            if self.secret:
+                headers["Authorization"] = "Bearer " + self.secret
+            request = urllib.request.Request(self.endpoint + path, data=data,
+                                             headers=headers, method=method)
+            try:
+                with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+                        request, timeout=timeout) as response:
+                    body = response.read()
+                    return json.loads(body) if body else None
+            except urllib.error.HTTPError as exc:
+                raise RuntimeError("Clash core API returned HTTP %s" % exc.code) from exc
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                raise RuntimeError("Clash core API unavailable") from exc
+        args = ["--unix-socket", self.endpoint, "-X", method]
         if payload is not None:
             args += ["-H", "Content-Type: application/json", "--data", json.dumps(payload)]
         args += ["-w", "\n%{http_code}", "http://localhost" + path]
@@ -154,15 +177,33 @@ class Core:
             return None
 
 
-def discover_core(budget):
-    for socket in sorted(glob.glob("/tmp/mihomo-party-%s-*.sock" % os.getuid())):
-        core = Core(socket, budget)
+def controller_candidates(system, override=None, uid=None):
+    if override:
+        parsed = urllib.parse.urlparse(override if "://" in override else "http://" + override)
+        if parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost", "::1") or not parsed.port:
+            raise RuntimeError("Controller must be a local HTTP address, such as 127.0.0.1:9090")
+        return ["http://127.0.0.1:%d" % parsed.port]
+    if system == "Windows":
+        return ["http://127.0.0.1:%d" % port for port in (9090, 9097, 9091, 9092)]
+    if system == "Darwin":
+        return sorted(glob.glob("/tmp/mihomo-party-%s-*.sock" % uid))
+    raise RuntimeError("Only macOS and Windows are supported")
+
+
+def discover_core(budget, controller=None):
+    candidates = controller_candidates(platform.system(), controller,
+                                       os.getuid() if hasattr(os, "getuid") else None)
+    authorization_failed = False
+    for endpoint in candidates:
+        core = Core(endpoint, budget, os.environ.get("CLASH_API_SECRET", ""))
         try:
             core.get("/version")
             return core
-        except (RuntimeError, ValueError, subprocess.TimeoutExpired):
-            pass
-    raise RuntimeError("No running Clash Party core socket found")
+        except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+            authorization_failed |= "HTTP 401" in str(exc)
+    if authorization_failed:
+        raise RuntimeError("Local mihomo controller requires CLASH_API_SECRET")
+    raise RuntimeError("No running local mihomo controller found; set CLASH_CONTROLLER if its port is custom")
 
 
 def route_counters(core, group):
@@ -176,6 +217,24 @@ def route_counters(core, group):
             raise RuntimeError("No active %s suffix rule targeting %s" % (domain, group))
         counters[kind] = matches[0].get("extra", {}).get("hitCount", 0)
     return counters
+
+
+def detect_group(core, proxies, requested=None):
+    if requested:
+        if requested not in proxies or proxies[requested].get("type") != "Selector":
+            raise RuntimeError("Requested selector group not found: " + requested)
+        return requested
+    rules = core.get("/rules")["rules"]
+    groups = []
+    for domain in ("chatgpt.com", "openai.com"):
+        groups.append({r.get("proxy") for r in rules
+                       if r.get("type") == "DomainSuffix" and r.get("payload") == domain
+                       and not r.get("extra", {}).get("disabled", False)})
+    common = groups[0] & groups[1]
+    valid = [name for name in common if proxies.get(name, {}).get("type") == "Selector"]
+    if not valid:
+        raise RuntimeError("OpenAI rules do not share a selectable group; pass --group after inspecting routes")
+    return min(valid, key=lambda name: (name.lower() != "openai", name))
 
 
 def real_probe(port, kind, budget):
@@ -209,8 +268,14 @@ def probe_candidate_once(port, budget):
         return {kind: futures[kind].result() for kind in TARGETS}
 
 
-def table_path():
-    root = Path(os.environ.get("XDG_CACHE_HOME", "~/.cache")).expanduser()
+def table_path(system=None, environment=None, home=None):
+    system = system or platform.system()
+    environment = environment if environment is not None else os.environ
+    home = Path(home) if home is not None else Path.home()
+    if system == "Windows":
+        root = Path(environment.get("LOCALAPPDATA", str(home / "AppData" / "Local")))
+    else:
+        root = Path(environment.get("XDG_CACHE_HOME", str(home / ".cache"))).expanduser()
     return root / "clash-network-optimize" / "nodes.json"
 
 
@@ -252,6 +317,17 @@ def restore_if_owned(core, group, original, last_selected):
 
 
 def system_proxy_enabled():
+    if platform.system() == "Windows":
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                 r"Software\Microsoft\Windows\CurrentVersion\Internet Settings")
+            with key:
+                enabled = winreg.QueryValueEx(key, "ProxyEnable")[0]
+                server = str(winreg.QueryValueEx(key, "ProxyServer")[0]).lower()
+            return bool(enabled) and ("127.0.0.1" in server or "localhost" in server)
+        except (OSError, ValueError):
+            return False
     try:
         result = subprocess.run(["scutil", "--proxy"], capture_output=True, text=True, timeout=0.5)
         return "HTTPEnable : 1" in result.stdout and "HTTPProxy : 127.0.0.1" in result.stdout
@@ -261,11 +337,15 @@ def system_proxy_enabled():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--group", default="openAI")
+    parser.add_argument("--group", help="OpenAI selector group; auto-detected from rules by default")
+    parser.add_argument("--controller", help="Local mihomo API address, e.g. 127.0.0.1:9090")
     parser.add_argument("--apply", action="store_true", help="Keep best fully verified node")
     args = parser.parse_args()
     budget = Budget()
-    core = discover_core(budget)
+    curl_name = "curl.exe" if platform.system() == "Windows" else "curl"
+    if not shutil.which(curl_name):
+        raise RuntimeError(curl_name + " is required")
+    core = discover_core(budget, args.controller or os.environ.get("CLASH_CONTROLLER"))
     config = core.get("/configs")
     if config.get("mode") != "rule":
         raise RuntimeError("Expected rule mode; inspect routing first")
@@ -273,14 +353,15 @@ def main():
     if not isinstance(port, int) or port <= 0:
         raise RuntimeError("No active mixed-port")
     if not system_proxy_enabled():
-        print("Note: system HTTP proxy is not enabled on 127.0.0.1; app routing may differ")
-    before_hits = route_counters(core, args.group)
+        print("Note: system HTTP proxy is not enabled on loopback; TUN or app routing may differ")
     proxies = core.get("/proxies")["proxies"]
-    group_data = proxies[args.group]
+    group = detect_group(core, proxies, args.group)
+    before_hits = route_counters(core, group)
+    group_data = proxies[group]
     original = group_data["now"]
     names = [n for n in group_data["all"] if n not in ("DIRECT", "REJECT")
              and (proxies.get(n, {}).get("type") != "Selector" or n == original)]
-    fingerprint = hashlib.sha256((args.group + "\0" + "\0".join(sorted(names))).encode()).hexdigest()
+    fingerprint = hashlib.sha256((group + "\0" + "\0".join(sorted(names))).encode()).hexdigest()
     path = table_path()
     table = load_table(path, fingerprint)
     if table:
@@ -306,10 +387,10 @@ def main():
             if budget.left() < 4.5:
                 print("Budget reached; skipping remaining candidates", flush=True)
                 break
-            if core.current(args.group) != last_selected:
+            if core.current(group) != last_selected:
                 raise RuntimeError("Selection changed externally; stop benchmarking")
             last_selected = name
-            core.select(args.group, name)
+            core.select(group, name)
             values = probe_candidate(port, budget)
             results[name] = values
             good = all(all(v is not None for v in values[kind]) for kind in TARGETS)
@@ -322,17 +403,17 @@ def main():
                            "successes": prior.get("successes", 0) + (1 if good else 0)}
             print(name, "chat", values["chat"], "api", values["api"], flush=True)
             if len(results) == 1:
-                after_hits = route_counters(core, args.group)
+                after_hits = route_counters(core, group)
                 if any(after_hits[k] <= before_hits[k] for k in TARGETS):
                     raise RuntimeError("Real requests did not hit the expected OpenAI rules")
     finally:
-        restore_if_owned(core, args.group, original, last_selected)
+        restore_if_owned(core, group, original, last_selected)
     save_table(path, fingerprint, table)
     best = choose_best(results)
     print("Recommended:", best, flush=True)
     if args.apply:
         def final_check():
-            if core.current(args.group, restore=True) != best:
+            if core.current(group, restore=True) != best:
                 return False
             if budget.left() > 4.5:
                 pair = probe_candidate_once(port, budget)
@@ -341,9 +422,9 @@ def main():
             return True
 
         apply_with_rollback(best, original,
-                            lambda n: core.select(args.group, n, restore=True),
+                            lambda n: core.select(group, n, restore=True),
                             final_check,
-                            lambda: core.current(args.group, restore=True))
+                            lambda: core.current(group, restore=True))
         print("Applied:", best, flush=True)
     print("Elapsed: %.2fs" % (time.monotonic() - budget.start), flush=True)
 

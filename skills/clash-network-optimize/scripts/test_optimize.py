@@ -1,5 +1,8 @@
 import importlib.util
+import http.server
+import json
 import pathlib
+import threading
 import unittest
 
 
@@ -97,6 +100,57 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(candidates[0], "US - good")
         self.assertIn("JP - slow", candidates)
         self.assertNotIn("HK - fast", candidates)
+
+    def test_windows_controller_and_cache_location(self):
+        self.assertEqual(optimize.controller_candidates("Windows")[:2],
+                         ["http://127.0.0.1:9090", "http://127.0.0.1:9097"])
+        self.assertEqual(optimize.controller_candidates("Windows", "localhost:1234"),
+                         ["http://127.0.0.1:1234"])
+        with self.assertRaisesRegex(RuntimeError, "local HTTP"):
+            optimize.controller_candidates("Windows", "https://example.com:9090")
+        path = optimize.table_path("Windows", {"LOCALAPPDATA": r"C:\Users\Ada\AppData\Local"})
+        self.assertEqual(path.name, "nodes.json")
+        self.assertEqual(path.parent.name, "clash-network-optimize")
+        self.assertIn("AppData", str(path))
+
+    def test_local_tcp_controller_uses_secret_without_shell_argument(self):
+        seen = {}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen["path"] = self.path
+                seen["authorization"] = self.headers.get("Authorization")
+                data = json.dumps({"version": "test"}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *_args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            core = optimize.Core("http://127.0.0.1:%d" % server.server_port,
+                                 optimize.Budget(), "private-test-token")
+            self.assertEqual(core.get("/version"), {"version": "test"})
+            self.assertEqual(seen, {"path": "/version", "authorization": "Bearer private-test-token"})
+        finally:
+            server.shutdown()
+            thread.join()
+            server.server_close()
+
+    def test_autodetect_group_from_shared_openai_rules(self):
+        class FakeCore:
+            def get(self, _path):
+                return {"rules": [
+                    {"type": "DomainSuffix", "payload": "chatgpt.com", "proxy": "AI"},
+                    {"type": "DomainSuffix", "payload": "openai.com", "proxy": "AI"},
+                ]}
+
+        self.assertEqual(optimize.detect_group(FakeCore(), {"AI": {"type": "Selector"}}), "AI")
 
 
 if __name__ == "__main__":
