@@ -17,3 +17,18 @@
 
 - [video-auto-publisher](https://github.com/cikewuliuqi520/video-auto-publisher) — 一键文生视频自动发布系统（Next.js + DeepSeek + FFmpeg）
 - [ supermarket-voice-assistant](https://github.com/cikewuliuqi520/supermarket-voice-assistant) — 超市语音助手 - 支持语音查价、智能对话、商品管理
+
+
+### 🌐 Clash 网络优化 Skill
+
+给 Mac 上的 Clash Party / mihomo 选择可用且稳定的 OpenAI 节点。单次执行有 20 秒截止时间；测速失败时保留或恢复原节点。节点维护表保存在使用者自己的电脑上，不包含订阅码或密钥。
+
+Codex 用户一键安装：
+
+```bash
+npx --yes skills add cikewuliuqi520/cikewuliuqi520 --skill clash-network-optimize --agent codex --global --yes
+```
+
+安装后对 Codex 说「优化下网络问题」，或明确说「优化 OpenAI 的 Clash 节点」。
+
+要求 macOS、Python 3、curl 和已启动的 Clash Party。节点表默认存放在 `~/.cache/clash-network-optimize/nodes.json`，每台电脑独立维护。详见 [Skill 说明](skills/clash-network-optimize/SKILL.md)。
