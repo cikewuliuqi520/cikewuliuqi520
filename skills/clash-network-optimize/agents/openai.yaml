@@ -1,0 +1,3 @@
+interface:
+  display_name: "Clash 网络优化"
+  short_description: "诊断 OpenAI 代理路由并实测选择稳定节点"
